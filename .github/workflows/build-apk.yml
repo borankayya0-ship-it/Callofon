@@ -1,236 +1,431 @@
-name: Build APK
+name: Sahte Numara VoIP APK Build
+
 on:
   push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Java Kurulumu
         uses: actions/setup-java@v4
         with:
+          distribution: 'zulu'
           java-version: '17'
-          distribution: 'temurin'
 
-      - name: Setup Android SDK Manuel - HATA DUZELTILDI
-        run: |
-          set -e
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls $ANDROID_HOME/cmdline-tools/
-          # Lisanslari kabul et
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          # Gerekli paketleri yukle
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" "platforms;android-33"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
-
-      - name: Setup Gradle 8.6
-        uses: gradle/actions/setup-gradle@v4
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
         with:
-          gradle-version: '8.6'
+          flutter-version: '3.22.2'
+          channel: 'stable'
 
-      - name: Create Full Android Project
+      - name: Flutter Proje Olustur
         run: |
-          set -e
-          mkdir -p app/src/main/java/com/fakecall/voip
-          mkdir -p app/src/main/assets
-          mkdir -p app/src/main/res/values
+          flutter create . --org com.profesyonel.voip --project-name sahte_aramam --platforms=android
+          flutter config --no-analytics
 
-          cat > settings.gradle <<'EOF'
-          include ':app'
-          EOF
+      - name: Profesyonel Kodlari Yaz
+        run: |
+          cat > pubspec.yaml << 'PUBEOF'
+          name: sahte_aramam
+          description: Profesyonel internet uzerinden sahte numara ile sesli arama
+          publish_to: 'none'
+          version: 1.0.0+1
+          environment:
+            sdk: ">=3.0.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            cupertino_icons: ^1.0.5
+            flutter_webrtc: ^0.10.7
+            peerdart: ^1.5.2
+            permission_handler: ^11.3.0
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+          flutter:
+            uses-material-design: true
+          PUBEOF
 
-          cat > build.gradle <<'EOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.2'
-                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'
-              }
+          cat > lib/main.dart << 'DARTEOF'
+          import 'dart:async';
+          import 'package:flutter/material.dart';
+          import 'package:flutter_webrtc/flutter_webrtc.dart';
+          import 'package:peerdart/peerdart.dart';
+          import 'package:permission_handler/permission_handler.dart';
+
+          void main() {
+            WidgetsFlutterBinding.ensureInitialized();
+            runApp(const MyApp());
           }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+
+          class MyApp extends StatelessWidget {
+            const MyApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: 'Sahte Aramam Pro',
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData(
+                  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
+                  useMaterial3: true,
+                ),
+                home: const VoipHome(),
+              );
+            }
           }
-          task clean(type: Delete) {
-              delete rootProject.buildDir
+
+          class VoipHome extends StatefulWidget {
+            const VoipHome({super.key});
+            @override
+            State<VoipHome> createState() => _VoipHomeState();
           }
-          EOF
 
-          cat > app/build.gradle <<'EOF'
-          apply plugin: 'com.android.application'
-          apply plugin: 'org.jetbrains.kotlin.android'
+          class _VoipHomeState extends State<VoipHome> {
+            final TextEditingController _myIdController = TextEditingController();
+            final TextEditingController _remoteIdController = TextEditingController();
+            
+            Peer? _peer;
+            MediaStream? _localStream;
+            MediaConnection? _currentCall;
+            bool _isConnected = false;
+            bool _inCall = false;
+            bool _isMicMuted = false;
+            String _status = "Sahte numaranı gir ve bağlan";
+            String _callStatus = "";
 
-          android {
-              namespace 'com.fakecall.voip'
-              compileSdk 34
-              buildToolsVersion "34.0.0"
-              defaultConfig {
-                  applicationId "com.fakecall.voip"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+            @override
+            void dispose() {
+              _myIdController.dispose();
+              _remoteIdController.dispose();
+              _localStream?.dispose();
+              _peer?.dispose();
+              super.dispose();
+            }
+
+            Future<void> _requestPermissions() async {
+              await [Permission.microphone].request();
+            }
+
+            Future<void> _connect() async {
+              final myId = _myIdController.text.trim();
+              if (myId.isEmpty) {
+                setState(() => _status = "Lütfen sahte numara gir!");
+                return;
               }
-              buildTypes {
-                  release { minifyEnabled false }
-                  debug { minifyEnabled false }
+              if (myId.length < 3) {
+                setState(() => _status = "Numara en az 3 haneli olsun");
+                return;
               }
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
+
+              await _requestPermissions();
+              setState(() {
+                _status = "Bağlanıyor...";
+                _callStatus = "";
+              });
+
+              try {
+                _localStream = await navigator.mediaDevices.getUserMedia({
+                  'audio': {
+                    'echoCancellation': true,
+                    'noiseSuppression': true,
+                    'autoGainControl': true,
+                  },
+                  'video': false
+                });
+
+                final options = PeerOptions(
+                  host: '0.peerjs.com',
+                  port: 443,
+                  secure: true,
+                  path: '/',
+                  config: {
+                    'iceServers': [
+                      {'urls': 'stun:stun.l.google.com:19302'},
+                      {'urls': 'stun:stun1.l.google.com:19302'},
+                    ]
+                  }
+                );
+
+                _peer = Peer(myId, options: options);
+
+                _peer!.on("open").listen((id) {
+                  setState(() {
+                    _isConnected = true;
+                    _status = "Bağlısın: $id";
+                    _callStatus = "Arkadaşının numarasını girip arayabilirsin";
+                  });
+                });
+
+                _peer!.on<MediaConnection>("call").listen((call) async {
+                  if (_inCall) {
+                    call.close();
+                    return;
+                  }
+                  setState(() {
+                    _callStatus = "${call.peer} seni arıyor...";
+                  });
+                  
+                  // Gelen aramayı otomatik cevapla
+                  _currentCall = call;
+                  call.answer(_localStream!);
+                  _handleCallEvents(call);
+                });
+
+                _peer!.on("error").listen((err) {
+                  setState(() {
+                    _status = "Hata: ${err.type} - ID zaten kullanımda olabilir";
+                    _isConnected = false;
+                  });
+                });
+
+                _peer!.on("disconnected").listen((_) {
+                  setState(() {
+                    _isConnected = false;
+                    _status = "Bağlantı koptu";
+                  });
+                });
+
+              } catch (e) {
+                setState(() => _status = "Hata: $e");
               }
-              kotlinOptions {
-                  jvmTarget = '17'
+            }
+
+            void _handleCallEvents(MediaConnection call) {
+              setState(() {
+                _inCall = true;
+                _callStatus = "${call.peer} ile konuşuyorsun";
+              });
+
+              call.on("stream").listen((stream) {
+                // Uzak ses geldi
+              });
+
+              call.on("close").listen((_) {
+                _endCall();
+              });
+
+              call.on("error").listen((_) {
+                _endCall();
+              });
+            }
+
+            Future<void> _makeCall() async {
+              final remoteId = _remoteIdController.text.trim();
+              if (!_isConnected) {
+                setState(() => _callStatus = "Önce kendi numaranla bağlan");
+                return;
               }
+              if (remoteId.isEmpty) {
+                setState(() => _callStatus = "Aranacak sahte numarayı gir");
+                return;
+              }
+              if (remoteId == _myIdController.text.trim()) {
+                setState(() => _callStatus = "Kendini arayamazsın");
+                return;
+              }
+
+              setState(() => _callStatus = "$remoteId aranıyor...");
+
+              try {
+                final call = _peer!.call(remoteId, _localStream!);
+                _currentCall = call;
+                _handleCallEvents(call);
+              } catch (e) {
+                setState(() => _callStatus = "Arama başarısız: $e");
+              }
+            }
+
+            void _endCall() {
+              _currentCall?.close();
+              setState(() {
+                _inCall = false;
+                _currentCall = null;
+                _callStatus = "Arama bitti";
+              });
+            }
+
+            void _toggleMute() {
+              if (_localStream != null) {
+                final audioTracks = _localStream!.getAudioTracks();
+                for (var track in audioTracks) {
+                  track.enabled = !track.enabled;
+                }
+                setState(() => _isMicMuted = !_isMicMuted);
+              }
+            }
+
+            void _disconnect() {
+              _endCall();
+              _localStream?.dispose();
+              _peer?.dispose();
+              setState(() {
+                _isConnected = false;
+                _isMicMuted = false;
+                _peer = null;
+                _localStream = null;
+                _status = "Bağlantı kesildi";
+                _callStatus = "";
+              });
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(
+                  title: const Text('Sahte Aramam Pro'),
+                  centerTitle: true,
+                ),
+                body: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(Icons.phone_in_talk_rounded, size: 80, color: _isConnected ? Colors.green : Colors.grey),
+                      const SizedBox(height: 10),
+                      Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 8),
+                      Text(_callStatus, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: _inCall ? Colors.greenAccent : Colors.white70)),
+                      const SizedBox(height: 25),
+                      
+                      if (!_isConnected) ...[
+                        TextField(
+                          controller: _myIdController,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Senin Sahte Numaran (Örn: 5555)',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.person_pin),
+                          ),
+                        ),
+                        const SizedBox(height: 15),
+                        FilledButton.icon(
+                          onPressed: _connect,
+                          icon: const Icon(Icons.wifi),
+                          label: const Text('İNTERNETE BAĞLAN'),
+                        ),
+                      ],
+
+                      if (_isConnected) ...[
+                        TextField(
+                          controller: _remoteIdController,
+                          keyboardType: TextInputType.phone,
+                          enabled: !_inCall,
+                          decoration: const InputDecoration(
+                            labelText: 'Arkadaşının Sahte Numarası',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.call),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        if (!_inCall)
+                          FilledButton.icon(
+                            onPressed: _makeCall,
+                            style: FilledButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.all(16)),
+                            icon: const Icon(Icons.call, size: 28),
+                            label: const Text('ARA', style: TextStyle(fontSize: 18)),
+                          ),
+                        if (_inCall) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: _toggleMute,
+                                  style: FilledButton.styleFrom(backgroundColor: _isMicMuted ? Colors.orange : Colors.blueGrey),
+                                  icon: Icon(_isMicMuted ? Icons.mic_off : Icons.mic),
+                                  label: Text(_isMicMuted ? 'Mik Aç' : 'Sessiz'),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: _endCall,
+                                  style: FilledButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.all(16)),
+                                  icon: const Icon(Icons.call_end),
+                                  label: const Text('KAPAT'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                        const SizedBox(height: 15),
+                        OutlinedButton.icon(
+                          onPressed: _disconnect,
+                          icon: const Icon(Icons.logout),
+                          label: const Text('Bağlantıyı Kes'),
+                        ),
+                      ],
+                      const SizedBox(height: 30),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(12)),
+                        child: const Text(
+                          'Nasıl Çalışır?\n1. İkiniz de kendi WiFi nize bağlanın\n2. Sen bir sahte numara yazıp BAĞLAN de (örn: 1111)\n3. Arkadaşın başka telefonda başka numara yazıp BAĞLAN desin (örn: 2222)\n4. Sen onun numarasını (2222) yazıp ARA de, anında konuşursunuz. Tamamen internet üzerinden, bedava.',
+                          style: TextStyle(fontSize: 12, color: Colors.white70),
+                        ),
+                      )
+                    ],
+                  ),
+                ),
+              );
+            }
           }
-          dependencies {
-              implementation 'androidx.core:core-ktx:1.12.0'
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'com.google.android.material:material:1.11.0'
-          }
-          EOF
+          DARTEOF
 
-          cat > app/proguard-rules.pro <<'EOF'
-          EOF
-
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">FakeCall VoIP</string>
-          </resources>
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
+          cat > android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
               <application
-                  android:allowBackup="true"
-                  android:label="@string/app_name"
-                  android:icon="@android:mipmap/sym_def_app_icon"
-                  android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
+                  android:label="Sahte Aramam Pro"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/launcher_icon">
                   <activity
                       android:name=".MainActivity"
-                      android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"
+                        />
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
               </application>
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.PROCESS_TEXT"/>
+                      <data android:mimeType="text/plain"/>
+                  </intent>
+              </queries>
           </manifest>
-          EOF
+          MANIFESTEOF
 
-          cat > app/src/main/java/com/fakecall/voip/MainActivity.kt <<'EOF'
-          package com.fakecall.voip
+      - name: Pub Get
+        run: flutter pub get
 
-          import android.Manifest
-          import android.annotation.SuppressLint
-          import android.content.pm.PackageManager
-          import android.os.Bundle
-          import android.webkit.PermissionRequest
-          import android.webkit.WebChromeClient
-          import android.webkit.WebView
-          import android.webkit.WebViewClient
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.core.app.ActivityCompat
-          import androidx.core.content.ContextCompat
+      - name: APK Build Et (Release)
+        run: flutter build apk --release --split-per-abi --no-tree-shake-icons
 
-          class MainActivity : AppCompatActivity() {
-              private lateinit var webView: WebView
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  webView = WebView(this)
-                  setContentView(webView)
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                      ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1001)
-                  }
-                  webView.settings.javaScriptEnabled = true
-                  webView.settings.mediaPlaybackRequiresUserGesture = false
-                  webView.settings.domStorageEnabled = true
-                  webView.settings.allowFileAccess = true
-                  webView.webViewClient = WebViewClient()
-                  webView.webChromeClient = object : WebChromeClient() {
-                      override fun onPermissionRequest(request: PermissionRequest) {
-                          runOnUiThread { request.grant(request.resources) }
-                      }
-                  }
-                  webView.loadUrl("file:///android_asset/index.html")
-              }
-          }
-          EOF
-
-          cat > app/src/main/assets/index.html <<'EOF'
-          <!DOCTYPE html>
-          <html lang="tr">
-          <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>FakeCall VoIP</title>
-          <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-          <style>
-          *{box-sizing:border-box;font-family:sans-serif}body{margin:0;background:#0f1115;color:#fff;display:flex;flex-direction:column;min-height:100vh}
-          .header{padding:20px;text-align:center;background:linear-gradient(135deg,#6a5af9,#8d4ef8)}
-          .header h1{margin:0;font-size:24px}.header p{opacity:.9;margin:6px 0 0;font-size:13px}
-          .container{padding:16px;flex:1;display:flex;flex-direction:column;gap:14px;max-width:480px;width:100%;margin:0 auto}
-          .card{background:#1a1d26;border:1px solid #2a2e3a;border-radius:16px;padding:16px}
-          .label{font-size:12px;color:#9aa0b2;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:block}
-          input{width:100%;background:#0f1115;border:1px solid #2a2e3a;color:#fff;padding:14px;border-radius:12px;font-size:16px;outline:none}
-          .btn{width:100%;padding:14px;border-radius:12px;border:0;font-weight:700;font-size:15px;cursor:pointer}
-          .btn-primary{background:linear-gradient(135deg,#6a5af9,#8d4ef8);color:#fff}
-          .btn-success{background:#1fdf75;color:#000}.btn-danger{background:#ff3b5c;color:#fff}
-          .btn:disabled{opacity:.4}.status{font-size:13px;padding:10px 12px;border-radius:10px;background:#0f1115;border:1px dashed #2a2e3a;color:#9aa0b2;margin-top:12px}
-          .status.online{color:#1fdf75;border-color:#1fdf75;background:rgba(31,223,117,.08)}.row{display:flex;gap:10px}.row .btn{flex:1}
-          </style>
-          </head>
-          <body>
-          <div class="header"><h1>FakeCall VoIP</h1><p>Internet uzerinden sahte numara ile gercek arama</p></div>
-          <div class="container">
-          <div class="card"><span class="label">Senin Sahte Numaran</span><input id="myNumber" placeholder="05550001122" /><div style="height:10px"></div><button id="connectBtn" class="btn btn-primary">Baglan ve Hazir Ol</button><div id="myStatus" class="status">Bagli degil</div></div>
-          <div class="card"><span class="label">Arkadasinin Numarasi</span><input id="friendNumber" placeholder="05550003344" /><div style="height:12px"></div><div class="row"><button id="callBtn" class="btn btn-success" disabled>Ara</button><button id="hangBtn" class="btn btn-danger" disabled>Kapat</button></div><div id="callStatus" class="status">Arama yok</div></div>
-          <audio id="remoteAudio" autoplay playsinline></audio>
-          </div>
-          <script>
-          let peer=null,currentCall=null,localStream=null;
-          const myNumberEl=document.getElementById('myNumber'),friendNumberEl=document.getElementById('friendNumber'),connectBtn=document.getElementById('connectBtn'),callBtn=document.getElementById('callBtn'),hangBtn=document.getElementById('hangBtn'),myStatusEl=document.getElementById('myStatus'),callStatusEl=document.getElementById('callStatus'),remoteAudio=document.getElementById('remoteAudio');
-          async function getMic(){if(localStream)return localStream;localStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});return localStream;}
-          connectBtn.onclick=async()=>{
-          const id=myNumberEl.value.trim().replace(/[^0-9]/g,'');if(id.length<7){alert('En az 7 haneli numara gir');return;}
-          connectBtn.disabled=true;myStatusEl.textContent='Mikrofon aciliyor...';try{await getMic();}catch{connectBtn.disabled=false;return;}
-          myStatusEl.textContent='Baglaniyor ID:'+id;
-          peer=new Peer(id,{config:{iceServers:[{urls:'stun:stun.l.google.com:19302'}]}});
-          peer.on('open',o=>{myStatusEl.textContent='✅ Baglisin! Numaran:'+o;myStatusEl.className='status online';callBtn.disabled=false;connectBtn.textContent='Bagli';});
-          peer.on('call',async call=>{if(!confirm(call.peer+' seni ariyor. Acilsin mi?')){call.close();return;}await getMic();handleCall(call);call.answer(localStream);callStatusEl.textContent=call.peer+' ile konusuyorsun...';});
-          peer.on('error',err=>{myStatusEl.textContent='Hata:'+err.type;if(err.type==='unavailable-id'){alert('Bu numara kullaniliyor, baska dene');connectBtn.disabled=false;}});
-          };
-          function handleCall(call){if(currentCall)currentCall.close();currentCall=call;callBtn.disabled=true;hangBtn.disabled=false;call.on('stream',s=>{remoteAudio.srcObject=s;remoteAudio.play().catch(()=>{});callStatusEl.textContent='🔊 Baglandi';});call.on('close',()=>endCallUI('Bitti'));call.on('error',e=>endCallUI('Hata:'+e.message));}
-          callBtn.onclick=async()=>{const fid=friendNumberEl.value.trim().replace(/[^0-9]/g,'');if(!fid){alert('Numara gir');return;}await getMic();callStatusEl.textContent=fid+' araniyor...';const call=peer.call(fid,localStream);if(!call){alert('Numara bagli degil');return;}handleCall(call);};
-          function endCallUI(m){callStatusEl.textContent=m;currentCall=null;callBtn.disabled=false;hangBtn.disabled=true;}
-          hangBtn.onclick=()=>{if(currentCall)currentCall.close();endCallUI('Kapattin');};
-          </script></body></html>
-          EOF
-
-      - name: Build Debug APK
-        run: |
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
-          gradle assembleDebug --stacktrace
-
-      - name: Upload APK Artifact
+      - name: APK Yukle
         uses: actions/upload-artifact@v4
         with:
-          name: FakeCall-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: sahte-aramam-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
