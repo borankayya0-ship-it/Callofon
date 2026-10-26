@@ -1,283 +1,40 @@
-name: Sahte Numara VoIP APK Build FINAL 100
+name: Hesap Makinesi Derle ve Test Et
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+    - name: Depoyu Klonla
+      uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
+      # Python Ortamını Kur
+    - name: Python Kurulumu
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-      - uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.19.6'
-          channel: 'stable'
+      # Gerekli kütüphaneleri yükle
+    - name: Bağımlılıkları Yükle
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
 
-      - name: Proje Olustur
-        run: |
-          flutter create . --org com.profesyonel.voip --project-name sahte_aramam --platforms=android
-          rm -f pubspec.lock
+      # Hesap makinesi kodunu derle (Tek dosya .exe veya çalıştırılabilir binary)
+    - name: PyInstaller ile Derle
+      run: |
+        pyinstaller --onefile hesap_makinesi.py
 
-      - name: minSdk ve Icon Fix
-        run: |
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
-          sed -i 's/minSdkVersion 19/minSdkVersion 21/g' android/app/build.gradle
-          sed -i 's/minSdk flutter.minSdkVersion/minSdk 21/g' android/app/build.gradle
-          # Icon dosyasini kontrol et, yoksa ic_launcher kullan
-          ls android/app/src/main/res/mipmap-hdpi/
-          echo "Fix uygulandi"
-
-      - name: Kodlari Yaz
-        run: |
-          cat > pubspec.yaml << 'PUBEOF'
-          name: sahte_aramam
-          description: Profesyonel internet uzerinden sahte numara ile sesli arama
-          publish_to: 'none'
-          version: 1.0.0+1
-          environment:
-            sdk: ">=3.3.0 <4.0.0"
-          dependencies:
-            flutter:
-              sdk: flutter
-            cupertino_icons: ^1.0.5
-            flutter_webrtc: 0.9.48
-            peerdart: 0.5.4
-            permission_handler: ^11.3.1
-          dev_dependencies:
-            flutter_test:
-              sdk: flutter
-            flutter_lints: ^3.0.0
-          flutter:
-            uses-material-design: true
-          PUBEOF
-
-          cat > lib/main.dart << 'DARTEOF'
-          import 'package:flutter/material.dart';
-          import 'package:flutter_webrtc/flutter_webrtc.dart';
-          import 'package:peerdart/peerdart.dart';
-          import 'package:permission_handler/permission_handler.dart';
-
-          void main() {
-            WidgetsFlutterBinding.ensureInitialized();
-            runApp(const MyApp());
-          }
-
-          class MyApp extends StatelessWidget {
-            const MyApp({super.key});
-            @override
-            Widget build(BuildContext context) {
-              return MaterialApp(
-                title: 'Sahte Aramam Pro',
-                debugShowCheckedModeBanner: false,
-                theme: ThemeData(
-                  colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
-                  useMaterial3: true,
-                ),
-                home: const VoipHome(),
-              );
-            }
-          }
-
-          class VoipHome extends StatefulWidget {
-            const VoipHome({super.key});
-            @override
-            State<VoipHome> createState() => _VoipHomeState();
-          }
-
-          class _VoipHomeState extends State<VoipHome> {
-            final TextEditingController _myIdController = TextEditingController();
-            final TextEditingController _remoteIdController = TextEditingController();
-            Peer? _peer;
-            MediaStream? _localStream;
-            MediaConnection? _currentCall;
-            bool _isConnected = false;
-            bool _inCall = false;
-            bool _isMicMuted = false;
-            String _status = "Sahte numaranı gir ve bağlan";
-            String _callStatus = "";
-
-            @override
-            void dispose() {
-              _myIdController.dispose();
-              _remoteIdController.dispose();
-              _localStream?.dispose();
-              _peer?.dispose();
-              super.dispose();
-            }
-
-            Future<void> _connect() async {
-              final myId = _myIdController.text.trim();
-              if (myId.length < 3) {
-                setState(() => _status = "En az 3 haneli numara gir!");
-                return;
-              }
-              await Permission.microphone.request();
-              setState(() { _status = "Bağlanıyor..."; _callStatus = ""; });
-              try {
-                _localStream = await navigator.mediaDevices.getUserMedia({
-                  'audio': {'echoCancellation': true, 'noiseSuppression': true},
-                  'video': false
-                });
-
-                _peer = Peer(
-                  id: myId,
-                  options: PeerOptions(
-                    host: '0.peerjs.com',
-                    port: 443,
-                    secure: true,
-                    path: '/',
-                    config: {
-                      'iceServers': [
-                        {'urls': 'stun:stun.l.google.com:19302'}
-                      ]
-                    }
-                  )
-                );
-
-                _peer!.on("open").listen((id) {
-                  setState(() { _isConnected = true; _status = "Bağlısın: $id"; _callStatus = "Arkadaşının numarasını gir"; });
-                });
-
-                _peer!.on<MediaConnection>("call").listen((call) async {
-                  if (_inCall) { call.close(); return; }
-                  setState(() => _callStatus = "${call.peer} arıyor...");
-                  _currentCall = call;
-                  call.answer(_localStream!);
-                  _handleCall(call);
-                });
-
-                _peer!.on("error").listen((err) {
-                  setState(() { _status = "ID kullanımda, başka dene"; _isConnected = false; });
-                });
-              } catch (e) {
-                setState(() => _status = "Hata: $e");
-              }
-            }
-
-            void _handleCall(MediaConnection call) {
-              setState(() { _inCall = true; _callStatus = "${call.peer} ile konuşuyorsun"; });
-              call.on("close").listen((_) => _endCall());
-              call.on("error").listen((_) => _endCall());
-            }
-
-            Future<void> _makeCall() async {
-              final remoteId = _remoteIdController.text.trim();
-              if (!_isConnected) { setState(() => _callStatus = "Önce bağlan"); return; }
-              if (remoteId.isEmpty || remoteId == _myIdController.text.trim()) { setState(() => _callStatus = "Geçerli numara gir"); return; }
-              setState(() => _callStatus = "$remoteId aranıyor...");
-              try {
-                final call = _peer!.call(remoteId, _localStream!);
-                _currentCall = call;
-                _handleCall(call);
-              } catch (e) {
-                setState(() => _callStatus = "Başarısız: $e");
-              }
-            }
-
-            void _endCall() {
-              _currentCall?.close();
-              setState(() { _inCall = false; _currentCall = null; _callStatus = "Bitti"; });
-            }
-
-            void _toggleMute() {
-              if (_localStream != null) {
-                for (var t in _localStream!.getAudioTracks()) { t.enabled = !t.enabled; }
-                setState(() => _isMicMuted = !_isMicMuted);
-              }
-            }
-
-            void _disconnect() {
-              _endCall();
-              _localStream?.dispose();
-              _peer?.dispose();
-              setState(() { _isConnected = false; _isMicMuted = false; _peer = null; _localStream = null; _status = "Kesildi"; _callStatus = ""; });
-            }
-
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                appBar: AppBar(title: const Text('Sahte Aramam Pro'), centerTitle: true),
-                body: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Icon(Icons.phone_in_talk_rounded, size: 80, color: _isConnected ? Colors.green : Colors.grey),
-                      const SizedBox(height: 10),
-                      Text(_status, textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      Text(_callStatus, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: _inCall ? Colors.greenAccent : Colors.white70)),
-                      const SizedBox(height: 25),
-                      if (!_isConnected) ...[
-                        TextField(controller: _myIdController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Senin Sahte Numaran (5555)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_pin))),
-                        const SizedBox(height: 15),
-                        FilledButton.icon(onPressed: _connect, icon: const Icon(Icons.wifi), label: const Text('İNTERNETE BAĞLAN')),
-                      ],
-                      if (_isConnected) ...[
-                        TextField(controller: _remoteIdController, keyboardType: TextInputType.phone, enabled: !_inCall, decoration: const InputDecoration(labelText: 'Arkadaşının Numarası', border: OutlineInputBorder(), prefixIcon: Icon(Icons.call))),
-                        const SizedBox(height: 20),
-                        if (!_inCall) FilledButton.icon(onPressed: _makeCall, style: FilledButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.all(16)), icon: const Icon(Icons.call, size: 28), label: const Text('ARA', style: TextStyle(fontSize: 18))),
-                        if (_inCall) Row(children: [
-                          Expanded(child: FilledButton.icon(onPressed: _toggleMute, style: FilledButton.styleFrom(backgroundColor: _isMicMuted ? Colors.orange : Colors.blueGrey), icon: Icon(_isMicMuted ? Icons.mic_off : Icons.mic), label: Text(_isMicMuted ? 'Mik Aç' : 'Sessiz'))),
-                          const SizedBox(width: 12),
-                          Expanded(child: FilledButton.icon(onPressed: _endCall, style: FilledButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.all(16)), icon: const Icon(Icons.call_end), label: const Text('KAPAT'))),
-                        ]),
-                        const SizedBox(height: 15),
-                        OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.logout), label: const Text('Kes')),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            }
-          }
-          DARTEOF
-
-          cat > android/app/src/main/AndroidManifest.xml << 'MANIFESTEOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <application
-                  android:label="Sahte Aramam Pro"
-                  android:name="${applicationName}"
-                  android:icon="@mipmap/ic_launcher">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTop"
-                      android:theme="@style/LaunchTheme"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-                      android:hardwareAccelerated="true"
-                      android:windowSoftInputMode="adjustResize">
-                      <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
-                      <intent-filter android:autoVerify="true">
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-                  <meta-data android:name="flutterEmbedding" android:value="2" />
-              </application>
-          </manifest>
-          MANIFESTEOF
-
-      - name: Pub Get
-        run: flutter pub get
-
-      - name: APK Build
-        run: flutter build apk --release --no-tree-shake-icons
-
-      - name: APK Yukle
-        uses: actions/upload-artifact@v4
-        with:
-          name: sahte-aramam-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+      # Derlenen çıktıyı GitHub Artifacts olarak kaydet
+    - name: Çıktıları Kaydet (Artifacts)
+      uses: actions/upload-artifact@v4
+      with:
+        name: hesap-makinesi-cikti
+        path: dist/
+        
