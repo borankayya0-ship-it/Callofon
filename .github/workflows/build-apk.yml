@@ -1,4 +1,4 @@
-name: Sahte Numara VoIP APK Build FIX
+name: Sahte Numara VoIP APK Build FIX2
 
 on:
   push:
@@ -26,10 +26,12 @@ jobs:
 
       - name: Flutter Proje Olustur
         run: |
+          flutter --version
+          dart --version
           flutter create . --org com.profesyonel.voip --project-name sahte_aramam --platforms=android
           rm -f pubspec.lock
 
-      - name: Profesyonel Kodlari Yaz - FIX
+      - name: Kodlari Yaz - DART UYUMLU
         run: |
           cat > pubspec.yaml << 'PUBEOF'
           name: sahte_aramam
@@ -37,13 +39,13 @@ jobs:
           publish_to: 'none'
           version: 1.0.0+1
           environment:
-            sdk: ">=3.0.0 <4.0.0"
+            sdk: ">=3.3.0 <4.0.0"
           dependencies:
             flutter:
               sdk: flutter
             cupertino_icons: ^1.0.5
-            flutter_webrtc: ^0.9.48
-            peerdart: ^0.5.6
+            flutter_webrtc: 0.9.48
+            peerdart: 0.5.4
             permission_handler: ^11.3.1
           dev_dependencies:
             flutter_test:
@@ -107,41 +109,27 @@ jobs:
               super.dispose();
             }
 
-            Future<void> _requestPermissions() async {
-              await Permission.microphone.request();
-            }
-
             Future<void> _connect() async {
               final myId = _myIdController.text.trim();
-              if (myId.isEmpty || myId.length < 3) {
+              if (myId.length < 3) {
                 setState(() => _status = "En az 3 haneli numara gir!");
                 return;
               }
-              await _requestPermissions();
-              setState(() {
-                _status = "Bağlanıyor...";
-                _callStatus = "";
-              });
+              await Permission.microphone.request();
+              setState(() { _status = "Bağlanıyor..."; _callStatus = ""; });
               try {
                 _localStream = await navigator.mediaDevices.getUserMedia({
-                  'audio': {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true},
+                  'audio': {'echoCancellation': true, 'noiseSuppression': true},
                   'video': false
                 });
 
                 _peer = Peer(myId, options: PeerOptions(
-                  host: '0.peerjs.com',
-                  port: 443,
-                  secure: true,
-                  path: '/',
+                  host: '0.peerjs.com', port: 443, secure: true, path: '/',
                   config: {'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}]}
                 ));
 
                 _peer!.on("open").listen((id) {
-                  setState(() {
-                    _isConnected = true;
-                    _status = "Bağlısın: $id";
-                    _callStatus = "Arkadaşının numarasını girip ara";
-                  });
+                  setState(() { _isConnected = true; _status = "Bağlısın: $id"; _callStatus = "Arkadaşının numarasını gir"; });
                 });
 
                 _peer!.on<MediaConnection>("call").listen((call) async {
@@ -149,26 +137,19 @@ jobs:
                   setState(() => _callStatus = "${call.peer} arıyor...");
                   _currentCall = call;
                   call.answer(_localStream!);
-                  _handleCallEvents(call);
+                  _handleCall(call);
                 });
 
                 _peer!.on("error").listen((err) {
-                  setState(() {
-                    _status = "Hata: ID kullanımda olabilir, başka numara dene";
-                    _isConnected = false;
-                  });
+                  setState(() { _status = "ID kullanımda, başka numara dene"; _isConnected = false; });
                 });
-
               } catch (e) {
                 setState(() => _status = "Hata: $e");
               }
             }
 
-            void _handleCallEvents(MediaConnection call) {
-              setState(() {
-                _inCall = true;
-                _callStatus = "${call.peer} ile konuşuyorsun";
-              });
+            void _handleCall(MediaConnection call) {
+              setState(() { _inCall = true; _callStatus = "${call.peer} ile konuşuyorsun"; });
               call.on("close").listen((_) => _endCall());
               call.on("error").listen((_) => _endCall());
             }
@@ -176,20 +157,20 @@ jobs:
             Future<void> _makeCall() async {
               final remoteId = _remoteIdController.text.trim();
               if (!_isConnected) { setState(() => _callStatus = "Önce bağlan"); return; }
-              if (remoteId.isEmpty || remoteId == _myIdController.text.trim()) { setState(() => _callStatus = "Geçerli bir numara gir"); return; }
+              if (remoteId.isEmpty || remoteId == _myIdController.text.trim()) { setState(() => _callStatus = "Geçerli numara gir"); return; }
               setState(() => _callStatus = "$remoteId aranıyor...");
               try {
                 final call = _peer!.call(remoteId, _localStream!);
                 _currentCall = call;
-                _handleCallEvents(call);
+                _handleCall(call);
               } catch (e) {
-                setState(() => _callStatus = "Arama başarısız: $e");
+                setState(() => _callStatus = "Başarısız: $e");
               }
             }
 
             void _endCall() {
               _currentCall?.close();
-              setState(() { _inCall = false; _currentCall = null; _callStatus = "Arama bitti"; });
+              setState(() { _inCall = false; _currentCall = null; _callStatus = "Bitti"; });
             }
 
             void _toggleMute() {
@@ -222,12 +203,12 @@ jobs:
                       Text(_callStatus, textAlign: TextAlign.center, style: TextStyle(fontSize: 14, color: _inCall ? Colors.greenAccent : Colors.white70)),
                       const SizedBox(height: 25),
                       if (!_isConnected) ...[
-                        TextField(controller: _myIdController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Senin Sahte Numaran (Örn: 5555)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_pin))),
+                        TextField(controller: _myIdController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Senin Sahte Numaran (5555)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_pin))),
                         const SizedBox(height: 15),
                         FilledButton.icon(onPressed: _connect, icon: const Icon(Icons.wifi), label: const Text('İNTERNETE BAĞLAN')),
                       ],
                       if (_isConnected) ...[
-                        TextField(controller: _remoteIdController, keyboardType: TextInputType.phone, enabled: !_inCall, decoration: const InputDecoration(labelText: 'Arkadaşının Sahte Numarası', border: OutlineInputBorder(), prefixIcon: Icon(Icons.call))),
+                        TextField(controller: _remoteIdController, keyboardType: TextInputType.phone, enabled: !_inCall, decoration: const InputDecoration(labelText: 'Arkadaşının Numarası', border: OutlineInputBorder(), prefixIcon: Icon(Icons.call))),
                         const SizedBox(height: 20),
                         if (!_inCall) FilledButton.icon(onPressed: _makeCall, style: FilledButton.styleFrom(backgroundColor: Colors.green, padding: const EdgeInsets.all(16)), icon: const Icon(Icons.call, size: 28), label: const Text('ARA', style: TextStyle(fontSize: 18))),
                         if (_inCall) Row(children: [
@@ -236,7 +217,7 @@ jobs:
                           Expanded(child: FilledButton.icon(onPressed: _endCall, style: FilledButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.all(16)), icon: const Icon(Icons.call_end), label: const Text('KAPAT'))),
                         ]),
                         const SizedBox(height: 15),
-                        OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.logout), label: const Text('Bağlantıyı Kes')),
+                        OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.logout), label: const Text('Kes')),
                       ],
                     ],
                   ),
@@ -265,7 +246,7 @@ jobs:
       - name: Pub Get
         run: flutter pub get
 
-      - name: APK Build Et
+      - name: APK Build
         run: flutter build apk --release --no-tree-shake-icons
 
       - name: APK Yukle
