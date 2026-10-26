@@ -1,4 +1,4 @@
-name: Sahte Numara VoIP APK Build FINAL FIX
+name: Sahte Numara VoIP APK Build FINAL 100
 
 on:
   push:
@@ -26,18 +26,14 @@ jobs:
           flutter create . --org com.profesyonel.voip --project-name sahte_aramam --platforms=android
           rm -f pubspec.lock
 
-      - name: minSdk 21 Fix - BU HATAYI DUZELTIYOR
+      - name: minSdk ve Icon Fix
         run: |
-          echo "Mevcut build.gradle:"
-          cat android/app/build.gradle
-          # Flutter 3.19 icin minSdkVersion
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle
           sed -i 's/minSdkVersion 19/minSdkVersion 21/g' android/app/build.gradle
-          # Yeni Gradle DSL icin minSdk
           sed -i 's/minSdk flutter.minSdkVersion/minSdk 21/g' android/app/build.gradle
-          sed -i 's/minSdk 19/minSdk 21/g' android/app/build.gradle
-          echo "Duzenlenmis build.gradle:"
-          cat android/app/build.gradle
+          # Icon dosyasini kontrol et, yoksa ic_launcher kullan
+          ls android/app/src/main/res/mipmap-hdpi/
+          echo "Fix uygulandi"
 
       - name: Kodlari Yaz
         run: |
@@ -251,10 +247,23 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <application android:label="Sahte Aramam Pro" android:name="${applicationName}" android:icon="@mipmap/launcher_icon">
-                  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
+              <application
+                  android:label="Sahte Aramam Pro"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
                       <meta-data android:name="io.flutter.embedding.android.NormalTheme" android:resource="@style/NormalTheme"/>
-                      <intent-filter android:autoVerify="true"><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
                   </activity>
                   <meta-data android:name="flutterEmbedding" android:value="2" />
               </application>
