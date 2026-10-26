@@ -1,4 +1,4 @@
-name: Sahte Numara VoIP APK Build FIX2
+name: Sahte Numara VoIP APK Build FINAL
 
 on:
   push:
@@ -9,29 +9,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Java Kurulumu
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Flutter Kurulumu
-        uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.6'
           channel: 'stable'
 
-      - name: Flutter Proje Olustur
+      - name: Proje Olustur
         run: |
-          flutter --version
-          dart --version
           flutter create . --org com.profesyonel.voip --project-name sahte_aramam --platforms=android
           rm -f pubspec.lock
 
-      - name: Kodlari Yaz - DART UYUMLU
+      - name: Kodlari Yaz FINAL FIX
         run: |
           cat > pubspec.yaml << 'PUBEOF'
           name: sahte_aramam
@@ -123,10 +118,21 @@ jobs:
                   'video': false
                 });
 
-                _peer = Peer(myId, options: PeerOptions(
-                  host: '0.peerjs.com', port: 443, secure: true, path: '/',
-                  config: {'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}]}
-                ));
+                // FIX: 0.5.4 surumunde id isimli parametre
+                _peer = Peer(
+                  id: myId,
+                  options: PeerOptions(
+                    host: '0.peerjs.com',
+                    port: 443,
+                    secure: true,
+                    path: '/',
+                    config: {
+                      'iceServers': [
+                        {'urls': 'stun:stun.l.google.com:19302'}
+                      ]
+                    }
+                  )
+                );
 
                 _peer!.on("open").listen((id) {
                   setState(() { _isConnected = true; _status = "Bağlısın: $id"; _callStatus = "Arkadaşının numarasını gir"; });
@@ -141,7 +147,7 @@ jobs:
                 });
 
                 _peer!.on("error").listen((err) {
-                  setState(() { _status = "ID kullanımda, başka numara dene"; _isConnected = false; });
+                  setState(() { _status = "ID kullanımda, başka dene"; _isConnected = false; });
                 });
               } catch (e) {
                 setState(() => _status = "Hata: $e");
