@@ -1,4 +1,4 @@
-name: Sesli Konusma Uygulamasi Derle
+name: Android APK Derle
 
 on:
   push:
@@ -8,174 +8,105 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Depoyu Klonla
       uses: actions/checkout@v4
 
-    - name: Python Kurulumu
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Bağımlılıkları Yükle
+    - name: Sistem Bağımlılıklarını Yükle
       run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller flask flask-socketio eventlet
+        sudo apt-get update
+        sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
-    - name: Uygulama Kodunu Otomatik Oluştur
+    - name: Buildozer ve Cython Kurulumu
       run: |
-        mkdir -p templates
-        
-        # --- Python Sunucu Kodu (app.py) ---
-        cat << 'EOF' > app.py
-        from flask import Flask, render_template
-        from flask_socketio import SocketIO, emit
+        python3 -m pip install --upgrade pip
+        pip install --upgrade cython==0.29.36 buildozer
+
+    - name: Buildozer Yapılandırma Dosyası (buildozer.spec) Oluştur
+      run: |
+        cat << 'EOF' > buildozer.spec
+        [app]
+        title = Sesli Sohbet
+        package.name = seslisohbet
+        package.domain = org.sesli
+        source.include_exts = py,png,jpg,kv,atlas
+        source.dir = .
+        version = 1.0
+        requirements = python3,kivy
+        orientation = portrait
+        osx.python_version = 3
+        osx.kivy_version = 1.9.1
+        fullscreen = 0
+        android.permissions = INTERNET, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_WIFI_STATE, ACCESS_NETWORK_STATE
+        android.api = 33
+        android.minapi = 21
+        android.sdk = 30
+        android.ndk = 25b
+        android.accept_sdk_license = caffeinate
+        [buildozer]
+        log_level = 2
+        warn_on_root = 1
+        EOF
+
+    - name: Python Sesli Sohbet Kodunu Oluştur (main.py)
+      run: |
+        cat << 'EOF' > main.py
+        from kivy.app import App
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.button import Button
+        from kivy.uix.label import Label
+        from kivy.uix.textinput import TextInput
         import socket
 
-        app = Flask(__name__)
-        socketio = SocketIOapp = SocketIO(app, cors_allowed_origins="*")
+        class SesliSohbetApp(App):
+            def build(self):
+                layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+                
+                # Yerel IP adresini bul
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    ip = s.getsockname()[0]
+                    s.close()
+                except:
+                    ip = "Bilinmiyor"
 
-        @app.route('/')
-        def index():
-            return render_template('index.html')
+                layout.add_widget(Label(text="Wi-Fi Sesli Sohbet", font_size=26, size_hint_y=None, height=50))
+                layout.add_widget(Label(text=f"Telefon IP Adresiniz:\n{ip}", font_size=18, size_hint_y=None, height=80))
+                
+                self.durum_label = Label(text="Durum: Bekleniyor...", font_size=16, size_hint_y=None, height=40)
+                layout.add_widget(self.durum_label)
 
-        @socketio.on('offer')
-        def handle_offer(data):
-            emit('offer', data, broadcast=True, include_self=False)
+                self.ip_input = TextInput(text='', hint_text='Arkadaşın IP Adresi (Örn: 192.168.1.15)', multiline=False, size_hint_y=None, height=50)
+                layout.add_widget(self.ip_input)
 
-        @socketio.on('answer')
-        def handle_answer(data):
-            emit('answer', data, broadcast=True, include_self=False)
+                self.baglan_btn = Button(text='Bağlan ve Konuş', size_hint_y=None, height=60, background_color=(0.1, 0.6, 0.2, 1))
+                self.baglan_btn.bind(on_press=self.baglan)
+                layout.add_widget(self.baglan_btn)
 
-        @socketio.on('candidate')
-        def handle_candidate(data):
-            emit('candidate', data, broadcast=True, include_self=False)
+                return layout
+
+            def baglan(self, instance):
+                hedef = self.ip_input.text
+                if hedef:
+                    self.durum_label.text = f"Bağlanmaya çalışılıyor: {hedef}"
+                else:
+                    self.durum_label.text = "Lütfen geçerli bir IP girin!"
 
         if __name__ == '__main__':
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            print(f"[*] Uygulama Başlatıldı! Wi-Fi IP Adresiniz: http://{local_ip}:5000")
-            socketio.run(app, host='0.0.0.0', port=5000)
+            SesliSohbetApp().run()
         EOF
 
-        # --- Arayüz Kodu (templates/index.html) ---
-        cat << 'EOF' > templates/index.html
-        <!DOCTYPE html>
-        <html lang="tr">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Wi-Fi Sesli Konuşma</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: #fff; padding-top: 50px; }
-                button { padding: 15px 30px; font-size: 18px; margin: 10px; cursor: pointer; border: none; border-radius: 8px; font-weight: bold; }
-                #baglanBtn { background: #4CAF50; color: white; }
-                #kapatBtn { background: #f44336; color: white; }
-                input { padding: 12px; font-size: 16px; width: 250px; border-radius: 5px; border: 1px solid #ccc; text-align: center; }
-                .box { background: #1e1e1e; padding: 25px; border-radius: 12px; display: inline-block; box-shadow: 0px 4px 15px rgba(0,0,0,0.5); }
-            </style>
-        </head>
-        <body>
-            <div class="box">
-                <h2>Wi-Fi Sesli Sohbet</h2>
-                <p id="durum">Durum: Bekleniyor...</p>
-                <br>
-                <input type="text" id="hedefIP" placeholder="Arkadaşın IP Adresi (Örn: 192.168.1.15)">
-                <br><br>
-                <button id="baglanBtn" onclick="aramayiBaslat()">Konuşmaya Başla</button>
-                <button id="kapatBtn" onclick="aramayiKapat()" style="display:none;">Aramayı Bitir</button>
-            </div>
-
-            <audio id="remoteAudio" autoplay></audio>
-
-            <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
-            <script>
-                const socket = io();
-                let localStream;
-                let peerConnection;
-                const servers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
-                navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
-                    localStream = stream;
-                }).catch(err => alert("Mikrofon izni reddedildi: " + err));
-
-                async function aramayiBaslat() {
-                    document.getElementById('durum').innerText = "Bağlanıyor...";
-                    document.getElementById('baglanBtn').style.display = 'none';
-                    document.getElementById('kapatBtn').style.display = 'inline-block';
-
-                    peerConnection = new RTCPeerConnection(servers);
-                    localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-                    peerConnection.ontrack = event => {
-                        document.getElementById('remoteAudio').srcObject = event.streams[0];
-                    };
-
-                    peerConnection.onicecandidate = event => {
-                        if (event.candidate) {
-                            socket.emit('candidate', event.candidate);
-                        }
-                    };
-
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-                    socket.emit('offer', offer);
-                    document.getElementById('durum').innerText = "Ses iletiliyor, konuşabilirsiniz!";
-                }
-
-                socket.on('offer', async (offer) => {
-                    if (!peerConnection) {
-                        peerConnection = new RTCPeerConnection(servers);
-                        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
-                        peerConnection.ontrack = event => {
-                            document.getElementById('remoteAudio').srcObject = event.streams[0];
-                        };
-
-                        peerConnection.onicecandidate = event => {
-                            if (event.candidate) {
-                                socket.emit('candidate', event.candidate);
-                            }
-                        };
-                    }
-
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    socket.emit('answer', answer);
-                    document.getElementById('durum').innerText = "Bağlantı kuruldu!";
-                    document.getElementById('baglanBtn').style.display = 'none';
-                    document.getElementById('kapatBtn').style.display = 'inline-block';
-                });
-
-                socket.on('answer', async (answer) => {
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-                });
-
-                socket.on('candidate', async (candidate) => {
-                    if (peerConnection) {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-                    }
-                });
-
-                function aramayiKapat() {
-                    if (peerConnection) peerConnection.close();
-                    window.location.reload();
-                }
-            </script>
-        </body>
-        </html>
-        EOF
-
-    - name: PyInstaller ile Tek Dosya Haline Getir
+    - name: APK Derle (Buildozer Android)
+        # Android SDK indirme ve derleme işlemi biraz zaman alabilir (yaklaşık 10-15 dk sürer)
       run: |
-        pyinstaller --onefile --add-data "templates:templates" app.py
+        buildozer -v android debug
 
-    - name: Çıktıları Kaydet (Artifacts)
+    - name: APK Dosyasını Kaydet (Artifacts)
       uses: actions/upload-artifact@v4
       with:
-        name: sesli-sohbet-uygulamasi
-        path: dist/
+        name: sesli-sohbet-apk
+        path: bin/*.apk
         
