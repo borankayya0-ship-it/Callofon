@@ -36,15 +36,13 @@ jobs:
         version = 1.0
         requirements = python3,kivy
         orientation = portrait
-        osx.python_version = 3
-        osx.kivy_version = 1.9.1
         fullscreen = 0
         android.permissions = INTERNET, RECORD_AUDIO, MODIFY_AUDIO_SETTINGS, ACCESS_WIFI_STATE, ACCESS_NETWORK_STATE
-        android.api = 33
+        android.api = 31
         android.minapi = 21
-        android.sdk = 30
         android.ndk = 25b
-        android.accept_sdk_license = caffeinate
+        android.accept_sdk_license = True
+
         [buildozer]
         log_level = 2
         warn_on_root = 1
@@ -64,7 +62,6 @@ jobs:
             def build(self):
                 layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
                 
-                # Yerel IP adresini bul
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     s.connect(("8.8.8.8", 80))
@@ -100,7 +97,6 @@ jobs:
         EOF
 
     - name: APK Derle (Buildozer Android)
-        # Android SDK indirme ve derleme işlemi biraz zaman alabilir (yaklaşık 10-15 dk sürer)
       run: |
         buildozer -v android debug
 
