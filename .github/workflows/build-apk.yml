@@ -1,40 +1,34 @@
-name: Hesap Makinesi Derle ve Test Et
+def hesapla():
+    print("--- Python Hesap Makinesi ---")
+    print("1. Toplama (+)")
+    print("2. Çıkarma (-)")
+    print("3. Çarpma (*)")
+    print("4. Bölme (/)")
 
-on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    secim = input("İşlem seçin (1/2/3/4): ")
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+    if secim in ('1', '2', '3', '4'):
+        try:
+            sayi1 = float(input("Birinci sayı: "))
+            sayi2 = float(input("İkinci sayı: "))
+        except ValueError:
+            print("Hata: Lütfen geçerli bir sayı girin!")
+            return
 
-    steps:
-    - name: Depoyu Klonla
-      uses: actions/checkout@v4
+        if secim == '1':
+            print(f"Sonuç: {sayi1} + {sayi2} = {sayi1 + sayi2}")
+        elif secim == '2':
+            print(f"Sonuç: {sayi1} - {sayi2} = {sayi1 - sayi2}")
+        elif secim == '3':
+            print(f"Sonuç: {sayi1} * {sayi2} = {sayi1 * sayi2}")
+        elif secim == '4':
+            if sayi2 == 0:
+                print("Hata: Bir sayı sıfıra bölünemez!")
+            else:
+                print(f"Sonuç: {sayi1} / {sayi2} = {sayi1 / sayi2}")
+    else:
+        print("Geçersiz seçim!")
 
-      # Python Ortamını Kur
-    - name: Python Kurulumu
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-      # Gerekli kütüphaneleri yükle
-    - name: Bağımlılıkları Yükle
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller
-
-      # Hesap makinesi kodunu derle (Tek dosya .exe veya çalıştırılabilir binary)
-    - name: PyInstaller ile Derle
-      run: |
-        pyinstaller --onefile hesap_makinesi.py
-
-      # Derlenen çıktıyı GitHub Artifacts olarak kaydet
-    - name: Çıktıları Kaydet (Artifacts)
-      uses: actions/upload-artifact@v4
-      with:
-        name: hesap-makinesi-cikti
-        path: dist/
-        
+if __name__ == "__main__":
+    hesapla()
+    
